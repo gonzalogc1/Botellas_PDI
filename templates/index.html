@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDI - Segmentador de Botellas</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <!-- Plotly CDN para Histogramas Interactivos -->
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- BARRA SUPERIOR -->
+        <header class="app-header">
+            <div class="logo">
+                <span class="logo-glow"></span>
+                <h1>PDI Bottle Segmenter</h1>
+            </div>
+            <div class="header-actions">
+                <label for="image-upload" class="btn-primary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+                    Cargar Imagen
+                </label>
+                <input type="file" id="image-upload" accept="image/*" style="display: none;">
+                <button id="btn-reset" class="btn-secondary">Restablecer Imagen</button>
+            </div>
+        </header>
+
+        <!-- CONTENIDO PRINCIPAL -->
+        <main class="app-main">
+            <!-- PANEL LATERAL DE CONTROLES -->
+            <aside class="sidebar card">
+                <div class="sidebar-section magic-section">
+                    <h3>⚡ SEGMENTACIÓN ESPECIAL</h3>
+                    <p>Selecciona la estrategia de PDI óptima para el tipo de imagen:</p>
+                    <div class="control-group" style="text-align: left; margin-bottom: 10px;">
+                        <label style="color: #ff007f;">Estrategia PDI:</label>
+                        <select id="magic-estrategia" style="background: rgba(0,0,0,0.4); border-color: rgba(255,0,127,0.3); color: white;">
+                            <option value="hsv_hue">Filtro de Matiz HSV (Agua clara/verdosa)</option>
+                            <option value="diff_br">Diferencia B - R (Ramas secas)</option>
+                            <option value="brillo_v">Reflejos de Brillo V (Aguas oscuras)</option>
+                            <option value="ccl_compacidad">Morfología + Compacidad (Estándar)</option>
+                        </select>
+                    </div>
+                    <div class="control-group" style="text-align: left; margin-bottom: 15px;">
+                        <label style="color: #ff007f;">Compacidad Mín: <span id="val-magic-comp">0.05</span></label>
+                        <input type="range" id="magic-compacidad" min="0.01" max="0.30" step="0.01" value="0.05" oninput="document.getElementById('val-magic-comp').innerText=this.value">
+                    </div>
+                    <button id="btn-magic-pipeline" class="btn-magic">Ejecutar Pipeline Botella</button>
+                </div>
+
+                <!-- ACORDEÓN DE FASES -->
+                <div class="accordion">
+                    <!-- FASE 1 -->
+                    <div class="accordion-item">
+                        <button class="accordion-header">📂 Fase 1: Preprocesamiento</button>
+                        <div class="accordion-content">
+                            <button onclick="applyAction('escala_grises')" class="btn-control">Convertir a Grises</button>
+                            <div class="control-group">
+                                <label>Simetría:</label>
+                                <select id="simetria-tipo">
+                                    <option value="horizontal">Horizontal (Espejo)</option>
+                                    <option value="vertical">Vertical</option>
+                                    <option value="ambas">Ambas</option>
+                                </select>
+                                <button onclick="applyAction('simetria', {tipo: document.getElementById('simetria-tipo').value})" class="btn-control">Aplicar</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- FASE 2 -->
+                    <div class="accordion-item">
+                        <button class="accordion-header">🎲 Fase 2: Ruido Sintético</button>
+                        <div class="accordion-content">
+                            <div class="control-group">
+                                <label>Tipo de Ruido:</label>
+                                <select id="ruido-tipo" onchange="toggleRuidoParams()">
+                                    <option value="sal_pimienta">Sal y Pimienta</option>
+                                    <option value="gaussiano">Gaussiano</option>
+                                </select>
+                            </div>
+                            <div id="param-sal-pimienta" class="control-group">
+                                <label>Densidad: <span id="val-densidad">0.05</span></label>
+                                <input type="range" id="ruido-densidad" min="0.01" max="0.3" step="0.01" value="0.05" oninput="document.getElementById('val-densidad').innerText=this.value">
+                            </div>
+                            <div id="param-gaussiano" class="control-group" style="display:none;">
+                                <label>Media: <span id="val-media">0</span></label>
+                                <input type="range" id="ruido-media" min="-50" max="50" step="1" value="0" oninput="document.getElementById('val-media').innerText=this.value">
+                                <label>Varianza: <span id="val-varianza">0.01</span></label>
+                                <input type="range" id="ruido-varianza" min="0.001" max="0.1" step="0.001" value="0.01" oninput="document.getElementById('val-varianza').innerText=this.value">
+                            </div>
+                            <button id="btn-apply-noise" class="btn-control">Inyectar Ruido</button>
+                        </div>
+                    </div>
+
+                    <!-- FASE 3 -->
+                    <div class="accordion-item">
+                        <button class="accordion-header">🧩 Fase 3: Filtrado Espacial</button>
+                        <div class="accordion-content">
+                            <div class="control-group">
+                                <label>Filtro:</label>
+                                <select id="filtro-tipo" onchange="toggleFiltroParams()">
+                                    <option value="promediador">Promediador (Box Blur)</option>
+                                    <option value="gaussiano">Gaussiano</option>
+                                    <option value="mediana">Mediana</option>
+                                    <option value="bilateral">Bilateral</option>
+                                    <option value="nlm">NLM Denoising</option>
+                                    <option value="laplaciano">Laplaciano</option>
+                                    <option value="sobel">Sobel</option>
+                                </select>
+                            </div>
+                            <div class="control-group" id="filter-ksize-container">
+                                <label>Kernel Size ($K$): <span id="val-ksize">5</span></label>
+                                <input type="range" id="filtro-k" min="3" max="25" step="2" value="5" oninput="document.getElementById('val-ksize').innerText=this.value">
+                            </div>
+                            <div id="params-gauss-sigma" class="control-group" style="display:none;">
+                                <label>Sigma ($\sigma$): <span id="val-sigma">1.0</span></label>
+                                <input type="range" id="filtro-sigma" min="0.1" max="5" step="0.1" value="1.0" oninput="document.getElementById('val-sigma').innerText=this.value">
+                            </div>
+                            <div id="params-bilateral" class="control-group" style="display:none;">
+                                <label>Sigma Color: <span id="val-sigmacolor">35</span></label>
+                                <input type="range" id="filtro-sigmacolor" min="10" max="200" step="5" value="35" oninput="document.getElementById('val-sigmacolor').innerText=this.value">
+                                <label>Sigma Espacio: <span id="val-sigmaspace">35</span></label>
+                                <input type="range" id="filtro-sigmaspace" min="10" max="200" step="5" value="35" oninput="document.getElementById('val-sigmaspace').innerText=this.value">
+                            </div>
+                            <div id="params-nlm" class="control-group" style="display:none;">
+                                <label>Fuerza ($h$): <span id="val-nlm-h">10</span></label>
+                                <input type="range" id="filtro-nlm-h" min="1" max="30" step="1" value="10" oninput="document.getElementById('val-nlm-h').innerText=this.value">
+                            </div>
+                            <div id="params-sobel" class="control-group" style="display:none;">
+                                <label>Eje:</label>
+                                <select id="filtro-sobel-eje">
+                                    <option value="ambas">Ambas Direcciones</option>
+                                    <option value="x">Eje X</option>
+                                    <option value="y">Eje Y</option>
+                                </select>
+                            </div>
+                            <button id="btn-apply-filter" class="btn-control">Aplicar Filtro</button>
+                        </div>
+                    </div>
+
+                    <!-- FASE 4 -->
+                    <div class="accordion-item">
+                        <button class="accordion-header">✨ Fase 4: Mejora</button>
+                        <div class="accordion-content">
+                            <button onclick="applyAction('mejora', {tipo: 'ecualizacion_global'})" class="btn-control">Ecualización Global</button>
+                            <div class="control-group">
+                                <label>CLAHE Clip Limit: <span id="val-clahe">2.0</span></label>
+                                <input type="range" id="mejora-clahe-clip" min="1" max="10" step="0.5" value="2.0" oninput="document.getElementById('val-clahe').innerText=this.value">
+                                <button onclick="applyAction('mejora', {tipo: 'clahe', clip: document.getElementById('mejora-clahe-clip').value})" class="btn-control">Aplicar CLAHE</button>
+                            </div>
+                            <div class="control-group">
+                                <label>Gamma ($\gamma$): <span id="val-gamma">1.0</span></label>
+                                <input type="range" id="mejora-gamma" min="0.1" max="5.0" step="0.1" value="1.0" oninput="document.getElementById('val-gamma').innerText=this.value">
+                                <button onclick="applyAction('mejora', {tipo: 'gamma', gamma: document.getElementById('mejora-gamma').value})" class="btn-control">Aplicar Gamma</button>
+                            </div>
+                            <div class="control-group">
+                                <label>Brillo (Beta): <span id="val-beta">0</span></label>
+                                <input type="range" id="mejora-beta" min="-100" max="100" step="5" value="0" oninput="document.getElementById('val-beta').innerText=this.value">
+                                <label>Contraste (Alpha): <span id="val-alpha">1.0</span></label>
+                                <input type="range" id="mejora-alpha" min="0.5" max="3.0" step="0.1" value="1.0" oninput="document.getElementById('val-alpha').innerText=this.value">
+                                <button onclick="applyAction('mejora', {tipo: 'lineal', alpha: document.getElementById('mejora-alpha').value, beta: document.getElementById('mejora-beta').value})" class="btn-control">Ajustar Lineal</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- FASE 5 -->
+                    <div class="accordion-item">
+                        <button class="accordion-header">🎯 Fase 5: Segmentación y Morfología</button>
+                        <div class="accordion-content">
+                            <div class="control-group">
+                                <label>Algoritmo Umbral:</label>
+                                <select id="seg-tipo" onchange="toggleSegParams()">
+                                    <option value="otsu">Otsu Global</option>
+                                    <option value="triangle">Triangle</option>
+                                    <option value="adaptativo">Adaptativo Local</option>
+                                    <option value="manual">Manual</option>
+                                </select>
+                            </div>
+                            <div id="param-seg-manual" class="control-group" style="display:none;">
+                                <label>Umbral: <span id="val-seg-manual">127</span></label>
+                                <input type="range" id="seg-val-manual" min="0" max="255" value="127" oninput="document.getElementById('val-seg-manual').innerText=this.value">
+                            </div>
+                            <div id="param-seg-adaptativo" class="control-group" style="display:none;">
+                                <label>Block Size: <span id="val-adapt-block">71</span></label>
+                                <input type="range" id="seg-adapt-block" min="3" max="151" step="2" value="71" oninput="document.getElementById('val-adapt-block').innerText=this.value">
+                                <label>Constante C: <span id="val-adapt-c">10</span></label>
+                                <input type="range" id="seg-adapt-c" min="-10" max="20" step="1" value="10" oninput="document.getElementById('val-adapt-c').innerText=this.value">
+                            </div>
+                            <button id="btn-apply-segment" class="btn-control">Binarizar Imagen</button>
+
+                            <hr class="divider">
+
+                            <div class="control-group">
+                                <label>Morfología:</label>
+                                <select id="morf-tipo">
+                                    <option value="cierre">Cierre (Closing)</option>
+                                    <option value="apertura">Apertura (Opening)</option>
+                                    <option value="dilatacion">Dilatación</option>
+                                    <option value="erosion">Erosión</option>
+                                    <option value="gradiente">Gradiente Morfológico</option>
+                                    <option value="tophat">Top Hat</option>
+                                    <option value="blackhat">Black Hat</option>
+                                </select>
+                            </div>
+                            <div class="control-group">
+                                <label>Elemento Estructurante:</label>
+                                <select id="morf-forma">
+                                    <option value="elipse">Elipse</option>
+                                    <option value="cuadrado">Cuadrado</option>
+                                    <option value="cruz">Cruz</option>
+                                </select>
+                            </div>
+                            <div class="control-group">
+                                <label>Tamaño Kernel: <span id="val-morf-k">11</span></label>
+                                <input type="range" id="morf-ksize" min="3" max="51" step="2" value="11" oninput="document.getElementById('val-morf-k').innerText=this.value">
+                            </div>
+                            <button id="btn-apply-morf" class="btn-control">Aplicar Operación</button>
+                        </div>
+                    </div>
+
+                    <!-- FASE 6 -->
+                    <div class="accordion-item">
+                        <button class="accordion-header">🔬 Fase 6: Análisis CCL</button>
+                        <div class="accordion-content">
+                            <p class="hint">Asegúrate de que la imagen ya esté binarizada (blanco y negro).</p>
+                            <button onclick="applyAction('analizar')" class="btn-magic">Ejecutar CCL y Extraer Botella</button>
+                        </div>
+                    </div>
+
+                    <!-- FASE 7 -->
+                    <div class="accordion-item">
+                        <button class="accordion-header">🗜️ Fase 7: Compresión DCT</button>
+                        <div class="accordion-content">
+                            <div class="control-group">
+                                <label>Calidad Compresión: <span id="val-calidad">50</span>%</label>
+                                <input type="range" id="dct-calidad" min="1" max="99" value="50" oninput="document.getElementById('val-calidad').innerText=this.value">
+                            </div>
+                            <button id="btn-apply-dct" class="btn-control">Comprimir Imagen</button>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- PANEL DE VISUALIZACIÓN -->
+            <section class="visualizer">
+                <div class="workspace-grids">
+                    <!-- Cuadrícula de Imágenes -->
+                    <div class="image-card">
+                        <h4>Imagen Original / Referencia</h4>
+                        <div class="image-wrapper" id="orig-wrapper">
+                            <div class="empty-state">No se ha cargado imagen</div>
+                            <img id="img-original" src="" alt="Original" style="display:none;">
+                        </div>
+                    </div>
+                    <div class="image-card">
+                        <h4>Imagen Procesada</h4>
+                        <div class="image-wrapper" id="proc-wrapper">
+                            <div class="empty-state">No se ha procesado imagen</div>
+                            <img id="img-procesada" src="" alt="Procesada" style="display:none;">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Fila Inferior: Histograma + Métricas -->
+                <div class="data-row">
+                    <div class="metricas-card card">
+                        <h3>Métricas del Objeto</h3>
+                        <div id="metricas-container" class="metrics-grid">
+                            <div class="metric-item">
+                                <div class="metric-label">Área</div>
+                                <div class="metric-value" id="m-area">-</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-label">Perímetro</div>
+                                <div class="metric-value" id="m-perimetro">-</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-label">Simetría (IoU)</div>
+                                <div class="metric-value" id="m-simetria">-</div>
+                            </div>
+                            <div class="metric-item">
+                                <div class="metric-label">Centroide (X, Y)</div>
+                                <div class="metric-value" id="m-centroide">-</div>
+                            </div>
+                        </div>
+                        <div id="ccl-colormap-container" style="display:none; margin-top:15px; text-align:center;">
+                            <h4 style="margin-bottom:8px;">Mapa de Etiquetas CCL</h4>
+                            <img id="img-colormap" src="" alt="CCL Colormap" style="max-width:100%; border-radius:8px;">
+                        </div>
+                    </div>
+                    <div class="histograma-card card">
+                        <h3>Espectro del Histograma</h3>
+                        <div id="plotly-histogram"></div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Animación de Carga -->
+    <div id="loader" class="loader-overlay" style="display: none;">
+        <div class="spinner"></div>
+        <p>Procesando imagen...</p>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
